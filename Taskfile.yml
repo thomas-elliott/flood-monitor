@@ -1,0 +1,201 @@
+version: '3'
+
+vars:
+  BINARY_NAME: weather-alert
+  IMAGE_NAME: flood-monitor
+  REGISTRY: ghcr.io
+  REPO_NAME: thomas-elliott/flood-monitor
+
+env:
+  CGO_ENABLED: 0
+  GOOS: linux
+
+tasks:
+  default:
+    desc: Show available tasks
+    cmds:
+      - task --list
+
+  clean:
+    desc: Clean build artifacts
+    cmds:
+      - rm -f {{.BINARY_NAME}}
+      - docker image prune -f
+
+  fmt:
+    desc: Format Go code
+    cmds:
+      - go fmt ./...
+
+  vet:
+    desc: Vet Go code for potential issues
+    cmds:
+      - go vet ./...
+
+  tidy:
+    desc: Download and tidy Go modules
+    cmds:
+      - go mod download
+      - go mod tidy
+
+  build:
+    desc: Build the binary locally
+    deps: [fmt, vet, tidy]
+    cmds:
+      - go build -a -installsuffix cgo -o {{.BINARY_NAME}} ./cmd/weather-alert
+
+  test:
+    desc: Run tests
+    cmds:
+      - go test -v ./...
+
+  docker-build:
+    desc: Build Docker image locally
+    cmds:
+      - docker build -t {{.IMAGE_NAME}}:latest .
+      - docker build -t {{.REGISTRY}}/{{.REPO_NAME}}:latest .
+
+  docker-run:
+    desc: Run Docker container locally (requires env vars)
+    deps: [docker-build]
+    cmds:
+      - |
+        docker run --rm \
+          -e LATITUDE={{.LATITUDE | default "52.52"}} \
+          -e LONGITUDE={{.LONGITUDE | default "13.41"}} \
+          -e NFTY_URL={{.NFTY_URL | default "https://ntfy.sh/weather-alert"}} \
+          -e CHECK_INTERVAL={{.CHECK_INTERVAL | default "1h"}} \
+          {{.IMAGE_NAME}}:latest
+
+  docker-push:
+    desc: Push Docker image to registry (manual push)
+    deps: [docker-build]
+    cmds:
+      - docker push {{.REGISTRY}}/{{.REPO_NAME}}:latest
+
+  release-check:
+    desc: Check if we're on a release tag
+    cmds:
+      - |
+        TAG=$(git describe --exact-match --tags HEAD 2>/dev/null || echo "")
+        if [[ ! "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+          echo "Not on a release tag (expected format: vX.X.X)"
+          exit 1
+        fi
+        echo "On release tag: $TAG"
+
+  get-version:
+    desc: Get the current latest version
+    cmds:
+      - |
+        LATEST=$(git tag -l "v*.*.*" | sort -V | tail -1)
+        if [ -z "$LATEST" ]; then
+          echo "v0.0.0"
+        else
+          echo "$LATEST"
+        fi
+
+  bump-patch:
+    desc: Bump patch version (vX.X.X -> vX.X.X+1)
+    cmds:
+      - |
+        LATEST=$(task get-version)
+        if [ "$LATEST" = "v0.0.0" ]; then
+          NEW_VERSION="v0.0.1"
+        else
+          VERSION=${LATEST#v}
+          IFS='.' read -r MAJOR MINOR PATCH <<< "$VERSION"
+          NEW_VERSION="v$MAJOR.$MINOR.$((PATCH + 1))"
+        fi
+        echo "Bumping $LATEST -> $NEW_VERSION"
+        git tag "$NEW_VERSION"
+        echo "Created tag $NEW_VERSION. Push with: git push origin $NEW_VERSION"
+
+  bump-minor:
+    desc: Bump minor version (vX.X.X -> vX.X+1.0)
+    cmds:
+      - |
+        LATEST=$(task get-version)
+        if [ "$LATEST" = "v0.0.0" ]; then
+          NEW_VERSION="v0.1.0"
+        else
+          VERSION=${LATEST#v}
+          IFS='.' read -r MAJOR MINOR PATCH <<< "$VERSION"
+          NEW_VERSION="v$MAJOR.$((MINOR + 1)).0"
+        fi
+        echo "Bumping $LATEST -> $NEW_VERSION"
+        git tag "$NEW_VERSION"
+        echo "Created tag $NEW_VERSION. Push with: git push origin $NEW_VERSION"
+
+  bump-major:
+    desc: Bump major version (vX.X.X -> vX+1.0.0)
+    cmds:
+      - |
+        LATEST=$(task get-version)
+        if [ "$LATEST" = "v0.0.0" ]; then
+          NEW_VERSION="v1.0.0"
+        else
+          VERSION=${LATEST#v}
+          IFS='.' read -r MAJOR MINOR PATCH <<< "$VERSION"
+          NEW_VERSION="v$((MAJOR + 1)).0.0"
+        fi
+        echo "Bumping $LATEST -> $NEW_VERSION"
+        git tag "$NEW_VERSION"
+        echo "Created tag $NEW_VERSION. Push with: git push origin $NEW_VERSION"
+
+  release-patch:
+    desc: Bump patch version and push release
+    cmds:
+      - task: bump-patch
+      - |
+        NEW_TAG=$(git describe --tags --abbrev=0)
+        echo "Pushing release tag: $NEW_TAG"
+        git push origin "$NEW_TAG"
+
+  release-minor:
+    desc: Bump minor version and push release
+    cmds:
+      - task: bump-minor
+      - |
+        NEW_TAG=$(git describe --tags --abbrev=0)
+        echo "Pushing release tag: $NEW_TAG"
+        git push origin "$NEW_TAG"
+
+  release-major:
+    desc: Bump major version and push release
+    cmds:
+      - task: bump-major
+      - |
+        NEW_TAG=$(git describe --tags --abbrev=0)
+        echo "Pushing release tag: $NEW_TAG"
+        git push origin "$NEW_TAG"
+
+  release-info:
+    desc: Show release information and available commands
+    cmds:
+      - |
+        echo "Current tags:"
+        git tag -l "v*.*.*" | sort -V | tail -5
+        echo ""
+        LATEST=$(task get-version)
+        echo "Latest version: $LATEST"
+        echo ""
+        echo "Available release commands:"
+        echo "  task bump-patch       # Create patch tag locally"
+        echo "  task bump-minor       # Create minor tag locally" 
+        echo "  task bump-major       # Create major tag locally"
+        echo ""
+        echo "  task release-patch    # Bump patch and push (triggers CI)"
+        echo "  task release-minor    # Bump minor and push (triggers CI)"
+        echo "  task release-major    # Bump major and push (triggers CI)"
+
+  dev:
+    desc: Run locally with environment variables
+    deps: [build]
+    cmds:
+      - |
+        LATITUDE={{.LATITUDE | default "52.52"}} \
+        LONGITUDE={{.LONGITUDE | default "13.41"}} \
+        NFTY_URL={{.NFTY_URL | default "https://ntfy.sh/weather-alert"}} \
+        CHECK_INTERVAL={{.CHECK_INTERVAL | default "10s"}} \
+        ./{{.BINARY_NAME}}
