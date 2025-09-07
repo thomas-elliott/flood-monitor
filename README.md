@@ -1,12 +1,29 @@
 # Flood Monitor
 
-This is a small Go application that periodically checks the weather forecast
-using the [Open-Meteo](https://open-meteo.com/) API. If heavy rain is expected
-(precipitation over 50&nbsp;mm in the next three hours) or a thunderstorm is
-forecast, it sends a message to a configured [ntfy](https://ntfy.sh/) endpoint.
+A Go application for monitoring severe weather conditions and sending real-time alerts. Currently monitors precipitation and thunderstorms using weather data APIs, with plans for modular provider architecture to support specialized flood monitoring data sources.
 
-The application is intended to run inside a Kubernetes cluster but can also run
-stand‑alone.
+## Current Architecture
+
+### Core Components
+- **Weather Monitoring**: Fetches hourly precipitation and weather code data  
+- **Alert Logic**: Triggers on ≥50mm precipitation in 3 hours OR thunderstorm detection (weather codes 95-99)
+- **Notification System**: HTTP POST alerts via ntfy
+- **Scheduler**: Configurable interval-based monitoring (default: 1 hour)
+
+### Data Flow
+1. Load configuration from environment variables
+2. Start periodic monitoring ticker  
+3. For each check:
+   - Query weather API for 3-hour forecast
+   - Calculate precipitation totals and check for thunderstorms
+   - Send alert if thresholds exceeded
+
+### Current Implementation
+- **Weather Provider**: Open-Meteo API integration (`fetchForecast()` in `cmd/weather-alert/main.go:87`)
+- **Alert Thresholds**: Hardcoded 50mm precipitation + thunderstorm codes 95-99
+- **Single-file Architecture**: All logic in `main.go` (144 lines)
+
+The application is designed to run as a long-running process in Kubernetes but can also run standalone.
 
 ## Configuration
 
@@ -59,3 +76,14 @@ spec:
 
 Build the Docker image with the provided `Dockerfile` and deploy using the
 manifest above or integrate into your existing setup.
+
+## Development Roadmap
+
+### Next Steps
+1. **Simple Weather Provider Interface** - Basic abstraction to swap data sources
+2. **Unit Testing** - Test core logic with mock weather data  
+3. **Configuration Flexibility** - Customizable alert thresholds
+
+### Testing Approach
+- Mock weather data for unit testing core alert logic
+- Simple test scenarios: heavy rain, thunderstorms, normal weather

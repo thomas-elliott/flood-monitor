@@ -12,6 +12,22 @@ import (
 	"time"
 )
 
+type WeatherData struct {
+	PrecipitationMM float64
+	HasThunderstorm bool
+}
+
+type WeatherProvider interface {
+	GetForecast(ctx context.Context, lat, lon float64) (WeatherData, error)
+}
+
+type OpenMeteoProvider struct{}
+
+// AucklandProvider for NIWA/MetService data (placeholder)
+type AucklandProvider struct {
+	// Add fields for API keys, endpoints, etc.
+}
+
 type forecastResponse struct {
 	Hourly struct {
 		Time          []string  `json:"time"`
@@ -26,27 +42,29 @@ func main() {
 		fmt.Fprintf(os.Stderr, "config error: %v\n", err)
 		os.Exit(1)
 	}
+	
+	provider := &OpenMeteoProvider{}
 	ticker := time.NewTicker(cfg.Interval)
 	defer ticker.Stop()
 
 	for {
-		checkAndAlert(cfg)
+		checkAndAlert(cfg, provider)
 		<-ticker.C
 	}
 }
 
-func checkAndAlert(cfg *config) {
+func checkAndAlert(cfg *config, provider WeatherProvider) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	precipitation, thunder, err := fetchForecast(ctx, cfg.Latitude, cfg.Longitude)
+	weather, err := provider.GetForecast(ctx, cfg.Latitude, cfg.Longitude)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "forecast error: %v\n", err)
 		return
 	}
 
-	if precipitation >= 50 || thunder {
-		message := fmt.Sprintf("Heavy rain (%.1fmm) or thunderstorm expected in next 3h", precipitation)
+	if weather.PrecipitationMM >= 50 || weather.HasThunderstorm {
+		message := fmt.Sprintf("Heavy rain (%.1fmm) or thunderstorm expected in next 3h", weather.PrecipitationMM)
 		if err := sendAlert(ctx, cfg.NtfyURL, message); err != nil {
 			fmt.Fprintf(os.Stderr, "alert error: %v\n", err)
 		}
@@ -84,7 +102,15 @@ func loadConfig() (*config, error) {
 	return &config{Latitude: lat, Longitude: lon, Interval: interval, NtfyURL: nftyURL}, nil
 }
 
-func fetchForecast(ctx context.Context, lat, lon float64) (precipSum float64, thunder bool, err error) {
+func (p *OpenMeteoProvider) GetForecast(ctx context.Context, lat, lon float64) (WeatherData, error) {
+	precipSum, thunder, err := p.fetchOpenMeteoForecast(ctx, lat, lon)
+	return WeatherData{
+		PrecipitationMM: precipSum,
+		HasThunderstorm: thunder,
+	}, err
+}
+
+func (p *OpenMeteoProvider) fetchOpenMeteoForecast(ctx context.Context, lat, lon float64) (precipSum float64, thunder bool, err error) {
 	url := fmt.Sprintf("https://api.open-meteo.com/v1/forecast?latitude=%.4f&longitude=%.4f&hourly=precipitation,weathercode&forecast_days=1&timezone=UTC", lat, lon)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
@@ -140,4 +166,15 @@ func sendAlert(ctx context.Context, ntfyURL, message string) error {
 		return fmt.Errorf("ntfy returned status %s: %s", resp.Status, string(body))
 	}
 	return nil
+}
+
+// GetForecast implements WeatherProvider for Auckland-specific data
+func (p *AucklandProvider) GetForecast(ctx context.Context, lat, lon float64) (WeatherData, error) {
+	// TODO: Implement NIWA/MetService integration
+	// This could be:
+	// - NIWA API calls if available
+	// - MetService web scraping
+	// - Combination of both
+	
+	return WeatherData{}, fmt.Errorf("AucklandProvider not implemented yet")
 }

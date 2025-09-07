@@ -63,3 +63,4 @@ This is a single-purpose Go application that monitors weather conditions and sen
 ## Deployment
 
 The application is designed to run as a single replica in Kubernetes with the provided Dockerfile. It's a long-running process that checks weather conditions periodically and sends alerts when thresholds are exceeded.
+- use task task runner alwaysto run tests - task test
